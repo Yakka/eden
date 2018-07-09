@@ -42,14 +42,13 @@ stone_button = {}
 ui_line = 109 --y coordinates of the ui
 blink_time = 0.5 --period for something to blink
 --wild
-grass_atlas = {80, 64}
-
 grass_rules = 
 {id_self = 1, --grass id
  id_target = 1, --id of the block where grass grows
  id_neighbours = 2, --id of neighbour blocks
  amount_neighbours = 1, --amount of neighbours requiered for grass
- time_to_grow = 1.0} --time in seconds to transform
+ time_to_grow = 1.0,--time in seconds to transform
+ atlas = 80}--sprite index 
 wild_rules = {grass_rules}
 --debug
 debug = true --if true, we print the console
@@ -157,7 +156,7 @@ function _update()
  _palette_button(_new_vector(water_button.x, water_button.y + 3), 2)
  _palette_button(_new_vector(stone_button.x, stone_button.y + 3), 3)
  --wild
- foreach(wild_rules, apply_wild_rule)
+ foreach(wild_rules, _apply_wild_rule)
  last_time = time()
 end
 
@@ -201,12 +200,19 @@ function _draw()
  rectfill(0,0,127,128,7)
  --draws all the built blocks
  for i = 1, #drawn_grid, 1 do
-   spr(blocks_atlas[drawn_grid[i].id], drawn_grid[i].x, drawn_grid[i].y, 2, 2)
-   if drawn_grid[i].current_subtype != 0 then
-    spr(grass_atlas[drawn_grid[i].current_subtype], drawn_grid[i].x, drawn_grid[i].y, 2, 1)
-    --color(5)
-    --print(grass_atlas[drawn_grid[i].current_subtype])
+  spr(blocks_atlas[drawn_grid[i].id], drawn_grid[i].x, drawn_grid[i].y, 2, 2)
+  --draws the wild
+  if drawn_grid[i].current_subtype != 0 then
+   tested_rule = 1
+   subtype_found = false
+   while subtype_found == false do --we test all the rules to find the proper asset
+    if drawn_grid[i].current_subtype == wild_rules[tested_rule].id_self then
+     spr(wild_rules[tested_rule].atlas, drawn_grid[i].x, drawn_grid[i].y, 2, 1)
+     subtype_found = true
+    end
+    tested_rule += 1
    end
+  end
  end
  --ui
  _draw_tool_button(2, selected_tool, overed_tool, delete_button.x, delete_button.y)
@@ -435,11 +441,11 @@ function _transform_blocks(delta_time)
  for i = 1, #built_blocks do
   if built_blocks[i].current_subtype != built_blocks[i].next_subtype then
    if built_blocks[i].transformation_time <= 0.0 then
-    console[3] = "transformation of "..i.." from"..built_blocks[i].current_subtype.." to "..built_blocks[i].next_subtype
+    --console[3] = "transformation of "..i.." from"..built_blocks[i].current_subtype.." to "..built_blocks[i].next_subtype
     built_blocks[i].current_subtype = built_blocks[i].next_subtype
    else
     built_blocks[i].transformation_time -= delta_time
-    console[2] = "remaining time: "..built_blocks[i].transformation_time.." delta: "..delta_time
+    --console[2] = "remaining time: "..built_blocks[i].transformation_time.." delta: "..delta_time
    end
   end 
  end
@@ -510,7 +516,7 @@ end
 --p:::::::p                                    yyyyyyy                             
 --ppppppppp                                                                        
 
-function apply_wild_rule(rule)
+function _apply_wild_rule(rule)
  for i = 1, #built_blocks do
   if built_blocks[i].id == rule.id_target then
    --we test if grass can grow on the dirt
