@@ -42,14 +42,23 @@ stone_button = {}
 ui_line = 109 --y coordinates of the ui
 blink_time = 0.5 --period for something to blink
 --wild
-grass_rules = 
+small_grass_rule = 
 {id_self = 1, --grass id
  id_target = 1, --id of the block where grass grows
  id_neighbours = 2, --id of neighbour blocks
  amount_neighbours = 1, --amount of neighbours requiered for grass
  time_to_grow = 1.0,--time in seconds to transform
+ priority = 1, --doesn't apply if the current rule has a higher priority
  atlas = 80}--sprite index 
-wild_rules = {grass_rules}
+big_grass_rule = 
+{id_self = 2,
+ id_target = 1,
+ id_neighbours = 2,
+ amount_neighbours = 2,
+ time_to_grow = 1.0,
+ priority = 2,
+ atlas = 64}
+wild_rules = {big_grass_rule, small_grass_rule}
 --debug
 debug = true --if true, we print the console
 console_rect = {x1 = 0, y1 = 0, x2 = 128, y2 = 9}
@@ -403,12 +412,6 @@ function _remove_block(x, y, grid_to_sort)
 end
 
 -------------------------------------------------------------------------------
---test is an amount of neighbours fits with an id condition
---function _pick_neighbours(x, y, amount, id)
--- console[1] = "out..."
--- return _pick_neighbours(x, y, amount, id, 0)
---end
-
 --test is an amount of neighbours fits with an id and current_subtype condition
 function _pick_neighbours(x, y, amount, id, current_subtype)
  local found = false
@@ -435,6 +438,7 @@ function _pick_neighbours(x, y, amount, id, current_subtype)
  end
  return total >= amount
 end
+
 -------------------------------------------------------------------------------
 --transform all blocks to their next subtype
 function _transform_blocks(delta_time)
@@ -462,15 +466,15 @@ end
 -------------------------------------------------------------------------------
 --create a block
 function _new_block(x, y, id)
- block = {
+ return {
   x = x,
   y = y,
   id = id, --type of block
   current_subtype = 0,
   next_subtype = 0,
-  transformation_time = 0.0
+  transformation_time = 0.0,
+  subtype_priority = 0
  }
- return block
 end
 
 --   ggggggggg   ggggg aaaaaaaaaaaaa      mmmmmmm    mmmmmmm       eeeeeeeeeeee    
@@ -491,39 +495,19 @@ end
 -- g::::::ggg:::::::g                                                              
 --  gg:::::::::::::g                                                               
 --    ggg::::::ggg                                                                 
---       gggggg                                                                    
+--       gggggg                                                                                    
 
---                    lllllll                                                      
---                    l:::::l                                                      
---                    l:::::l                                                      
---                    l:::::l                                                      
---ppppp   ppppppppp    l::::l   aaaaaaaaaaaaayyyyyyy           yyyyyyy             
---p::::ppp:::::::::p   l::::l   a::::::::::::ay:::::y         y:::::y              
---p:::::::::::::::::p  l::::l   aaaaaaaaa:::::ay:::::y       y:::::y               
---pp::::::ppppp::::::p l::::l            a::::a y:::::y     y:::::y                
--- p:::::p     p:::::p l::::l     aaaaaaa:::::a  y:::::y   y:::::y                 
--- p:::::p     p:::::p l::::l   aa::::::::::::a   y:::::y y:::::y                  
--- p:::::p     p:::::p l::::l  a::::aaaa::::::a    y:::::y:::::y                   
--- p:::::p    p::::::p l::::l a::::a    a:::::a     y:::::::::y                    
--- p:::::ppppp:::::::pl::::::la::::a    a:::::a      y:::::::y                     
--- p::::::::::::::::p l::::::la:::::aaaa::::::a       y:::::y                      
--- p::::::::::::::pp  l::::::l a::::::::::aa:::a     y:::::y                       
--- p::::::pppppppp    llllllll  aaaaaaaaaa  aaaa    y:::::y                        
--- p:::::p                                         y:::::y                         
--- p:::::p                                        y:::::y                          
---p:::::::p                                      y:::::y                           
---p:::::::p                                     y:::::y                            
---p:::::::p                                    yyyyyyy                             
---ppppppppp                                                                        
-
+-- apply the rules for all blocks
 function _apply_wild_rule(rule)
  for i = 1, #built_blocks do
   if built_blocks[i].id == rule.id_target then
-   --we test if grass can grow on the dirt
+   --we test if this rule can apply on this block:
    if _pick_neighbours(built_blocks[i].x, built_blocks[i].y, rule.amount_neighbours, rule.id_neighbours, 0) then
-    if built_blocks[i].next_subtype != rule.id_self then
+    --if the block isn't already transforming, we apply the rule:
+    if built_blocks[i].subtype_priority < rule.priority then
      built_blocks[i].next_subtype = rule.id_self
      built_blocks[i].transformation_time = rule.time_to_grow
+     built_blocks[i].subtype_priority = rule.priority
     end
    end
   end
