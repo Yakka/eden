@@ -5,7 +5,7 @@ __lua__
 --bug: passer en tool 3 puis sortir écran rend certaines cases inategnables avec les tools snappés
 --bug: la console merde à afficher plus de deux lignes s'il y a un trou entre deux lignes
 --ascii: http://www.patorjk.com/software/taag/#p=display&h=0&v=0&f=doh&t=grid (font doh)
-
+--todo: refaire une passe sur le nommage 
 
 --grid coordinates
 grid = {}
@@ -21,8 +21,9 @@ mouse_hand = 32
 mouse_pressed = 48
 mouse_finger = {}
 shift_target_y = -5 --light shift to make the snap more natural
---blocks atlas
+--blocks data
 blocks_atlas = {6, 4}
+blocks_tags = {{"sand"}, {"water"}}
 --tools
 tools_atlas = {0, 16} --1 is to add, 2 is to delete, 0 is nothing
 selected_tool = 0
@@ -46,34 +47,92 @@ small_grass_rule =
 {id_self = 1, --grass id
  id_target = 1, --id of the block where grass grows
  id_neighbours = 2, --id of neighbour blocks
- subtype_neighbours = 0, --id of neighbour's subtype (0 if not required)
+ rule_tags = {"weak", "grass", "direct", "green"}, --tags of this asset
+ required_tags = {"water"}, --tags of its neighbours
  amount_neighbours = 1, --amount of neighbours requiered for grass
  time_to_grow = 1.0,--time in seconds to transform
- priority = 1, --doesn't apply if the current rule has a higher priority
+ priority = 2, --doesn't apply if the current rule has a higher priority
  atlas = 80}--sprite index 
+
 big_grass_rule = 
 {id_self = 2,
  id_target = 1,
  id_neighbours = 2,
- subtype_neighbours = 0,
+ rule_tags = {"strong", "grass", "direct", "green"},
+ required_tags = {"water"},
  amount_neighbours = 2,
  time_to_grow = 1.0,
- priority = 2,
+ priority = 3,
  atlas = 64}
+
 forest_rule = 
 {id_self = 3,
  id_target = 1,
  id_neighbours = 1,
- subtype_neighbours = 2,
+ rule_tags = {"forest", "direct", "green"},
+ required_tags = {"strong", "grass"},
  amount_neighbours = 2,
  time_to_grow = 1.0,
- priority = 3,
+ priority = 4,
  atlas = 96}
-wild_rules = {forest_rule, big_grass_rule, small_grass_rule}
+
+indirect_grass_rule =
+{id_self = 4,
+ id_target = 1,
+ id_neighbours = 1,
+ rule_tags = {"weak", "grass", "green"},
+ required_tags = {"green", "direct"},
+ amount_neighbours = 1,
+ time_to_grow = 2.0,
+ priority = 1,
+ atlas = 80}
+
+wild_rules = {forest_rule, big_grass_rule, small_grass_rule, indirect_grass_rule}
 --debug
-debug = true --if true, we print the console
+debug = false --if true, we print the console
 console_rect = {x1 = 0, y1 = 0, x2 = 128, y2 = 9}
-console = {"debug true"}                                                    
+console = {"debug true"} 
+
+--            dddddddd                                                           
+--            d::::::d                           tttt                            
+--            d::::::d                        ttt:::t                            
+--            d::::::d                        t:::::t                            
+--            d:::::d                         t:::::t                            
+--    ddddddddd:::::d   aaaaaaaaaaaaa   ttttttt:::::ttttttt      aaaaaaaaaaaaa   
+--  dd::::::::::::::d   a::::::::::::a  t:::::::::::::::::t      a::::::::::::a  
+-- d::::::::::::::::d   aaaaaaaaa:::::a t:::::::::::::::::t      aaaaaaaaa:::::a 
+--d:::::::ddddd:::::d            a::::a tttttt:::::::tttttt               a::::a 
+--d::::::d    d:::::d     aaaaaaa:::::a       t:::::t              aaaaaaa:::::a 
+--d:::::d     d:::::d   aa::::::::::::a       t:::::t            aa::::::::::::a 
+--d:::::d     d:::::d  a::::aaaa::::::a       t:::::t           a::::aaaa::::::a 
+--d:::::d     d:::::d a::::a    a:::::a       t:::::t    tttttta::::a    a:::::a 
+--d::::::ddddd::::::dda::::a    a:::::a       t::::::tttt:::::ta::::a    a:::::a 
+-- d:::::::::::::::::da:::::aaaa::::::a       tt::::::::::::::ta:::::aaaa::::::a 
+--  d:::::::::ddd::::d a::::::::::aa:::a        tt:::::::::::tt a::::::::::aa:::a
+--   ddddddddd   ddddd  aaaaaaaaaa  aaaa          ttttttttttt    aaaaaaaaaa  aaaa
+
+--create a vector
+function _new_vector(x, y)
+ vector = {
+  x = x,
+  y = y
+ }
+ return vector
+end
+-------------------------------------------------------------------------------
+--create a block
+function _new_block(x, y, id)
+ return {
+  x = x,
+  y = y,
+  id = id, --type of block
+  current_subtype = 0,
+  next_subtype = 0,
+  transformation_time = 0.0,
+  subtype_priority = 0,
+  tags = blocks_tags[id]
+ }
+end
 
 
 --  iiii                      iiii           tttt          
@@ -140,7 +199,6 @@ end
 
 function _update()
  local delta_time = time() - last_time
- console[4] = delta_time
  -- updates the blocks
  _transform_blocks(delta_time)
  --update the mouse position
@@ -422,72 +480,6 @@ function _remove_block(x, y, grid_to_sort)
  return buffer_blocks
 end
 
--------------------------------------------------------------------------------
---test is an amount of neighbours fits with an id and current_subtype condition
-function _pick_neighbours(x, y, amount, id, current_subtype)
- local found = false
- local total = 0 --amount of neighbours found
- for i = 1, #built_blocks do
-  if built_blocks[i].id == id and (current_subtype == 0 or current_subtype == built_blocks[i].current_subtype) then
-   if (built_blocks[i].x == x + grid_size_x / 2 and built_blocks[i].y == y + grid_size_y) then --right neighbour
-    found = true
-   end
-   if (built_blocks[i].x == x - grid_size_x / 2 and built_blocks[i].y == y + grid_size_y) then --left neighbour
-    found = true
-   end
-   if (built_blocks[i].x == x + (grid_size_x / 2) and built_blocks[i].y == y - grid_size_y) then --above neighbour
-    found = true
-   end
-   if (built_blocks[i].x == x - (grid_size_x / 2) and built_blocks[i].y == y - grid_size_y) then--below neighbour
-    found = true
-   end
-   if found then
-    found = false
-    total += 1
-   end
-  end
- end
- return total >= amount
-end
-
--------------------------------------------------------------------------------
---transform all blocks to their next subtype
-function _transform_blocks(delta_time)
- for i = 1, #built_blocks do
-  if built_blocks[i].current_subtype != built_blocks[i].next_subtype then
-   if built_blocks[i].transformation_time <= 0.0 then
-    --console[3] = "transformation of "..i.." from"..built_blocks[i].current_subtype.." to "..built_blocks[i].next_subtype
-    built_blocks[i].current_subtype = built_blocks[i].next_subtype
-   else
-    built_blocks[i].transformation_time -= delta_time
-    --console[2] = "remaining time: "..built_blocks[i].transformation_time.." delta: "..delta_time
-   end
-  end 
- end
-end
--------------------------------------------------------------------------------
---create a vector
-function _new_vector(x, y)
- vector = {
-  x = x,
-  y = y
- }
- return vector
-end
--------------------------------------------------------------------------------
---create a block
-function _new_block(x, y, id)
- return {
-  x = x,
-  y = y,
-  id = id, --type of block
-  current_subtype = 0,
-  next_subtype = 0,
-  transformation_time = 0.0,
-  subtype_priority = 0
- }
-end
-
 --   ggggggggg   ggggg aaaaaaaaaaaaa      mmmmmmm    mmmmmmm       eeeeeeeeeeee    
 --  g:::::::::ggg::::g a::::::::::::a   mm:::::::m  m:::::::mm   ee::::::::::::ee  
 -- g:::::::::::::::::g aaaaaaaaa:::::a m::::::::::mm::::::::::m e::::::eeeee:::::ee
@@ -508,22 +500,83 @@ end
 --    ggg::::::ggg                                                                 
 --       gggggg                                                                                    
 
+--test if an amount of neighbours fits with an id and tags condition
+function _pick_neighbours(x, y, amount, id, rule_tags)
+ local found = false
+ local total = 0 --amount of neighbours found
+ for i = 1, #built_blocks do
+  if built_blocks[i].id == id and _test_neighbour_tags(rule_tags, built_blocks[i].tags) then
+   if (built_blocks[i].x == x + grid_size_x / 2 and built_blocks[i].y == y + grid_size_y) then --right neighbour
+    found = true
+   end
+   if (built_blocks[i].x == x - grid_size_x / 2 and built_blocks[i].y == y + grid_size_y) then --left neighbour
+    found = true
+   end
+   if (built_blocks[i].x == x + (grid_size_x / 2) and built_blocks[i].y == y - grid_size_y) then --above neighbour
+    found = true
+   end
+   if (built_blocks[i].x == x - (grid_size_x / 2) and built_blocks[i].y == y - grid_size_y) then--below neighbour
+    found = true
+   end
+   if found then
+    found = false
+    total += 1
+   end
+  end
+ end
+ return total >= amount
+end
+-------------------------------------------------------------------------------
+--tests that a neighbour contains all the tags from a block
+function _test_neighbour_tags(block_tags, neighbour_tags)
+ match = true --we return this value at the end
+ for i = 1, #block_tags do --we try to find the block's tags one per one
+  tag_found = false 
+  for y = 1, #neighbour_tags do
+   if block_tags[i] == neighbour_tags[y] then
+    tag_found = true
+   else
+   --nothing
+   end
+  end
+  if tag_found == false then
+   match = false --if the neighbour doesn't contain at least one tag from the block, it's a fail
+  end
+ end
+ return match
+end
+-------------------------------------------------------------------------------
+--transform all blocks to their next subtype
+function _transform_blocks(delta_time)
+ for i = 1, #built_blocks do
+  if built_blocks[i].current_subtype != built_blocks[i].next_subtype then
+   if built_blocks[i].transformation_time <= 0.0 then
+    built_blocks[i].current_subtype = built_blocks[i].next_subtype
+   else
+    built_blocks[i].transformation_time -= delta_time
+   end
+  end 
+ end
+end
+-------------------------------------------------------------------------------
 -- apply the rules for all blocks
 function _apply_wild_rule(rule)
  for i = 1, #built_blocks do
   if built_blocks[i].id == rule.id_target then
    --we test if this rule can apply on this block:
-   if _pick_neighbours(built_blocks[i].x, built_blocks[i].y, rule.amount_neighbours, rule.id_neighbours, rule.subtype_neighbours) then
+   if _pick_neighbours(built_blocks[i].x, built_blocks[i].y, rule.amount_neighbours, rule.id_neighbours, rule.required_tags) then
     --if the block isn't already transforming, we apply the rule:
     if built_blocks[i].subtype_priority < rule.priority then
      built_blocks[i].next_subtype = rule.id_self
      built_blocks[i].transformation_time = rule.time_to_grow
      built_blocks[i].subtype_priority = rule.priority
+     built_blocks[i].tags = rule.rule_tags
     end
    end
   end
  end
 end
+
 __gfx__
 990000000000009900000066660000000000000000000000000000ffff0000000000000000000000000000000000000000000000000000000000000000000000
 9000000000000009000066666666000000000000000000000000ffffffff000000000dddddd0000000000dddddd0000000000dddddd0000000000dddddd00000
