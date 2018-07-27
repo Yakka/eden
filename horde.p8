@@ -14,39 +14,53 @@ grid_size_y = 4
 grid_shift_x = grid_size_x / 2
 --array containing all the built blocks sorted from above to below
 built_blocks = {}
+
 --mouse
 pressed = false
-target = {}
-mouse_hand = 32
-mouse_pressed = 48
-mouse_finger = {}
+mouse_target = {}
+mouse_atlas = 
+{32, --released
+ 48} --pressed
+mouse_pointer = {}
 shift_target_y = -5 --light shift to make the snap more natural
+
 --blocks data
-blocks_atlas = {6, 4}
-blocks_tags = {{"sand"}, {"water"}}
+blocks_atlas = 
+{6, --sand 
+ 4} --water
+blocks_tags = 
+{{"sand"}, 
+ {"water"}}
+
 --tools
-tools_atlas = {0, 16} --1 is to add, 2 is to delete, 0 is nothing
+tools_atlas = 
+{0,  --add 
+ 16} --delete
+delete_button_atlas =
+{12, --free
+ 14} --selected
 selected_tool = 0
-free_delete_button = 12
-selected_delete_button = 14 
-overed_tool = 0 --id of the overed tool
-delete_button = {} --coordinates of the delete button
+overed_tool = 0 --id of the overed tool, 0 by default
+
 --palettte
-free_palette_atlas = {44, 42}
-selected_palette_atlas = {45, 43}
+free_palette_atlas = 
+{44, --sand 
+ 42} --water
+selected_palette_atlas = 
+{45, --sand
+ 43} --water
 selected_palette = 1
 overed_palette = 0 --id of the overed palette button
-grass_button = {}
-water_button = {}
-stone_button = {}
+
 --ui
-ui_line = 109 --y coordinates of the ui
+ui_line = 109 --y coordinates of the ui. todo: dégueu, à enlever
 blink_time = 0.5 --period for something to blink
---wild
+
+--rules
 small_grass_rule = 
-{id_self = 1, --grass id
- id_target = 1, --id of the block where grass grows
- id_neighbours = 2, --id of neighbour blocks
+{rule_id = 1, --grass id
+ target_type = 1, --id of the block where grass grows
+ neighbours_type = 2, --id of neighbour blocks
  rule_tags = {"weak", "grass", "direct", "green"}, --tags of this asset
  required_tags = {"water"}, --tags of its neighbours
  amount_neighbours = 1, --amount of neighbours requiered for grass
@@ -55,9 +69,9 @@ small_grass_rule =
  atlas = 80}--sprite index 
 
 big_grass_rule = 
-{id_self = 2,
- id_target = 1,
- id_neighbours = 2,
+{rule_id = 2,
+ target_type = 1,
+ neighbours_type = 2,
  rule_tags = {"strong", "grass", "direct", "green"},
  required_tags = {"water"},
  amount_neighbours = 2,
@@ -66,9 +80,9 @@ big_grass_rule =
  atlas = 64}
 
 forest_rule = 
-{id_self = 3,
- id_target = 1,
- id_neighbours = 1,
+{rule_id = 3,
+ target_type = 1,
+ neighbours_type = 1,
  rule_tags = {"forest", "direct", "green"},
  required_tags = {"strong", "grass"},
  amount_neighbours = 2,
@@ -77,9 +91,9 @@ forest_rule =
  atlas = 96}
 
 indirect_grass_rule =
-{id_self = 4,
- id_target = 1,
- id_neighbours = 1,
+{rule_id = 4,
+ target_type = 1,
+ neighbours_type = 1,
  rule_tags = {"weak", "grass", "green"},
  required_tags = {"green", "direct"},
  amount_neighbours = 1,
@@ -87,7 +101,12 @@ indirect_grass_rule =
  priority = 1,
  atlas = 80}
 
-wild_rules = {forest_rule, big_grass_rule, small_grass_rule, indirect_grass_rule}
+rules_list = 
+{forest_rule, 
+ big_grass_rule, 
+ small_grass_rule, 
+ indirect_grass_rule}
+
 --debug
 debug = false --if true, we print the console
 console_rect = {x1 = 0, y1 = 0, x2 = 128, y2 = 9}
@@ -126,10 +145,10 @@ function _new_block(x, y, id)
   x = x,
   y = y,
   id = id, --type of block
-  current_subtype = 0,
-  next_subtype = 0,
+  current_rule = 0,
+  next_rule = 0,
   transformation_time = 0.0,
-  subtype_priority = 0,
+  rule_priority = 0,
   tags = blocks_tags[id]
  }
 end
@@ -162,7 +181,7 @@ function _init()
   shift = (shift + 1) % 2
  end
  --initiate the ui
- mouse_finger = _new_vector(6, 0)
+ mouse_pointer = _new_vector(6, 0)
  delete_button = _new_vector(1, 112)
  grass_button = _new_vector(16, 112)
  water_button = _new_vector(24, 112)
@@ -203,10 +222,10 @@ function _update()
  _transform_blocks(delta_time)
  --update the mouse position
  if selected_tool != 0 then 
-  target = _snap_to_grid(stat(32), stat(33) + shift_target_y)
+  mouse_target = _snap_to_grid(stat(32), stat(33) + shift_target_y)
  else --free mouse when no tool selected:
-  target.x = stat(32)
-  target.y = stat(33)
+  mouse_target.x = stat(32)
+  mouse_target.y = stat(33)
  end
  
  --right click to unselect a tool
@@ -220,9 +239,9 @@ function _update()
   --cannot build a block below the ui line (todo: refactor that)
   if stat(33) < ui_line then
    if selected_tool == 1 then --build a block
-    built_blocks = _add_sort_block(target.x, target.y, selected_palette, built_blocks)
+    built_blocks = _add_sort_block(mouse_target.x, mouse_target.y, selected_palette, built_blocks)
    else --destroy a block
-    built_blocks = _remove_block(target.x, target.y, built_blocks)
+    built_blocks = _remove_block(mouse_target.x, mouse_target.y, built_blocks)
    end
   end
  else
@@ -234,7 +253,7 @@ function _update()
  _palette_button(_new_vector(water_button.x, water_button.y + 3), 2)
  _palette_button(_new_vector(stone_button.x, stone_button.y + 3), 3)
  --wild
- foreach(wild_rules, _apply_wild_rule)
+ foreach(rules_list, _apply_wild_rule)
  last_time = time()
 end
 
@@ -259,12 +278,12 @@ end
 function _draw()
  --check if the mouse is not on the ui
  if stat(33) < ui_line then
-  --prepare a grid containg the blocks and the target in case the building tool is selected
+  --prepare a grid containg the blocks and the mouse_target in case the building tool is selected
   if selected_tool == 1 then
-   drawn_grid = _add_sort_block(target.x, target.y, selected_palette, built_blocks)
+   drawn_grid = _add_sort_block(mouse_target.x, mouse_target.y, selected_palette, built_blocks)
   elseif selected_tool == 2 then
    if _blinker(blink_time) then
-    drawn_grid = _remove_block(target.x, target.y, built_blocks)
+    drawn_grid = _remove_block(mouse_target.x, mouse_target.y, built_blocks)
    else
     drawn_grid = built_blocks
    end
@@ -280,13 +299,13 @@ function _draw()
  for i = 1, #drawn_grid, 1 do
   spr(blocks_atlas[drawn_grid[i].id], drawn_grid[i].x, drawn_grid[i].y, 2, 2)
   --draws the wild
-  if drawn_grid[i].current_subtype != 0 then
+  if drawn_grid[i].current_rule != 0 then
    tested_rule = 1
-   subtype_found = false
-   while subtype_found == false do --we test all the rules to find the proper asset
-    if drawn_grid[i].current_subtype == wild_rules[tested_rule].id_self then
-     spr(wild_rules[tested_rule].atlas, drawn_grid[i].x, drawn_grid[i].y, 2, 1)
-     subtype_found = true
+   rule_found = false
+   while rule_found == false do --we test all the rules to find the proper asset
+    if drawn_grid[i].current_rule == rules_list[tested_rule].rule_id then
+     spr(rules_list[tested_rule].atlas, drawn_grid[i].x, drawn_grid[i].y, 2, 1)
+     rule_found = true
     end
     tested_rule += 1
    end
@@ -299,13 +318,13 @@ function _draw()
  spr(46, water_button.x + 8, water_button.y, 1, 2) --closes the ui bar
  --draws the mouse pointer according to the selected tool
  if stat(33) < ui_line and selected_tool != 0 then
-  spr(tools_atlas[selected_tool], target.x, target.y, 2, 1)
+  spr(tools_atlas[selected_tool], mouse_target.x, mouse_target.y, 2, 1)
  end
  --draws the mouse hand differently depending on if pressed
  if pressed then
-  spr(mouse_pressed, stat(32), stat(33), 2, 1)
+  spr(mouse_atlas[2], stat(32), stat(33), 2, 1)
  else
-  spr(mouse_hand, stat(32), stat(33), 2, 1)
+  spr(mouse_atlas[1], stat(32), stat(33), 2, 1)
  end
  --debug console
  if debug then
@@ -337,11 +356,11 @@ end
 --draw a tool button
 function _draw_tool_button(tool_id, selected_id, overed_id, x, y)
  if tool_id == selected_id then
-  spr(selected_delete_button, x, y, 2, 2)
+  spr(delete_button_atlas[2], x, y, 2, 2)
  elseif tool_id == overed_id then
-  spr(selected_delete_button, x, y, 2, 2)
+  spr(delete_button_atlas[2], x, y, 2, 2)
  else
-  spr(free_delete_button, x, y, 2, 2)
+  spr(delete_button_atlas[1], x, y, 2, 2)
  end
 end
 -------------------------------------------------------------------------------
@@ -368,7 +387,7 @@ end
 -------------------------------------------------------------------------------
 --handle over and click on a tool button
 function _tool_button(button_position, tool_id)
- if _is_colliding(stat(32)+mouse_finger.x, stat(33)+mouse_finger.y, button_position, _new_vector(16,16)) then
+ if _is_colliding(stat(32)+mouse_pointer.x, stat(33)+mouse_pointer.y, button_position, _new_vector(16,16)) then
   overed_tool = tool_id
   if stat(34) == 1 then
    selected_tool = tool_id
@@ -380,7 +399,7 @@ end
 -------------------------------------------------------------------------------
 --handle over and click on a palette button
 function _palette_button(button_position, palette_id)
- if _is_colliding(stat(32)+mouse_finger.x, stat(33)+mouse_finger.y, button_position, _new_vector(8,16)) then
+ if _is_colliding(stat(32)+mouse_pointer.x, stat(33)+mouse_pointer.y, button_position, _new_vector(8,16)) then
   overed_palette = palette_id
   if stat(34) == 1 then
    selected_palette = palette_id
@@ -501,11 +520,11 @@ end
 --       gggggg                                                                                    
 
 --test if an amount of neighbours fits with an id and tags condition
-function _pick_neighbours(x, y, amount, id, rule_tags)
+function _test_all_neighbours(x, y, amount, id, rule_tags)
  local found = false
  local total = 0 --amount of neighbours found
  for i = 1, #built_blocks do
-  if built_blocks[i].id == id and _test_neighbour_tags(rule_tags, built_blocks[i].tags) then
+  if built_blocks[i].id == id and _test_one_neighbour(rule_tags, built_blocks[i].tags) then
    if (built_blocks[i].x == x + grid_size_x / 2 and built_blocks[i].y == y + grid_size_y) then --right neighbour
     found = true
    end
@@ -528,10 +547,10 @@ function _pick_neighbours(x, y, amount, id, rule_tags)
 end
 -------------------------------------------------------------------------------
 --tests that a neighbour contains all the tags from a block
-function _test_neighbour_tags(block_tags, neighbour_tags)
- match = true --we return this value at the end
+function _test_one_neighbour(block_tags, neighbour_tags)
+ local match = true --we return this value at the end
  for i = 1, #block_tags do --we try to find the block's tags one per one
-  tag_found = false 
+  local tag_found = false 
   for y = 1, #neighbour_tags do
    if block_tags[i] == neighbour_tags[y] then
     tag_found = true
@@ -549,9 +568,9 @@ end
 --transform all blocks to their next subtype
 function _transform_blocks(delta_time)
  for i = 1, #built_blocks do
-  if built_blocks[i].current_subtype != built_blocks[i].next_subtype then
+  if built_blocks[i].current_rule != built_blocks[i].next_rule then
    if built_blocks[i].transformation_time <= 0.0 then
-    built_blocks[i].current_subtype = built_blocks[i].next_subtype
+    built_blocks[i].current_rule = built_blocks[i].next_rule
    else
     built_blocks[i].transformation_time -= delta_time
    end
@@ -562,14 +581,14 @@ end
 -- apply the rules for all blocks
 function _apply_wild_rule(rule)
  for i = 1, #built_blocks do
-  if built_blocks[i].id == rule.id_target then
+  if built_blocks[i].id == rule.target_type then
    --we test if this rule can apply on this block:
-   if _pick_neighbours(built_blocks[i].x, built_blocks[i].y, rule.amount_neighbours, rule.id_neighbours, rule.required_tags) then
+   if _test_all_neighbours(built_blocks[i].x, built_blocks[i].y, rule.amount_neighbours, rule.neighbours_type, rule.required_tags) then
     --if the block isn't already transforming, we apply the rule:
-    if built_blocks[i].subtype_priority < rule.priority then
-     built_blocks[i].next_subtype = rule.id_self
+    if built_blocks[i].rule_priority < rule.priority then
+     built_blocks[i].next_rule = rule.rule_id
      built_blocks[i].transformation_time = rule.time_to_grow
-     built_blocks[i].subtype_priority = rule.priority
+     built_blocks[i].rule_priority = rule.priority
      built_blocks[i].tags = rule.rule_tags
     end
    end
