@@ -5,7 +5,7 @@ __lua__
 --bug: passer en tool 3 puis sortir écran rend certaines cases inategnables avec les tools snappés
 --bug: la console merde à afficher plus de deux lignes s'il y a un trou entre deux lignes
 --ascii: http://www.patorjk.com/software/taag/#p=display&h=0&v=0&f=doh&t=grid (font doh)
---todo: refaire une passe sur le nommage 
+--todo : passer les for i = 0 en for i in all()
 
 --grid coordinates
 grid = {}
@@ -17,6 +17,7 @@ built_blocks = {}
 
 --mouse
 pressed = false
+pressed = false
 mouse_target = {}
 mouse_atlas = 
 {32, --released
@@ -25,7 +26,7 @@ mouse_pointer = {}
 shift_target_y = -5 --light shift to make the snap more natural
 
 --blocks data
-blocks_atlas = 
+blocks_atlas =
 {6, --sand 
  4} --water
 blocks_tags = 
@@ -55,6 +56,10 @@ overed_palette = 0 --id of the overed palette button
 --ui
 ui_line = 109 --y coordinates of the ui. todo: dégueu, à enlever
 blink_time = 0.5 --period for something to blink
+
+--hand
+max_hand_speed = 80.0
+hand_acceleration = 100.0
 
 --rules
 small_grass_rule = 
@@ -153,7 +158,6 @@ function _new_block(x, y, id)
  }
 end
 
-
 --  iiii                      iiii           tttt          
 -- i::::i                    i::::i       ttt:::t          
 --  iiii                      iiii        t:::::t          
@@ -172,25 +176,26 @@ end
 --iiiiiiii  nnnnnn    nnnnnniiiiiiii          ttttttttttt  
                                                          
 function _init()
- --building the grid
- shift = 0
+ --builds the grid:
+ local shift = 0
  for y = 0, 127, grid_size_y do
   for x = 0, 127, grid_size_x do
    add(grid, _new_vector(x + shift * grid_shift_x, y))
   end
   shift = (shift + 1) % 2
  end
- --initiate the ui
+ --initiate the ui:
  mouse_pointer = _new_vector(6, 0)
  delete_button = _new_vector(1, 112)
  grass_button = _new_vector(16, 112)
  water_button = _new_vector(24, 112)
  stone_button = _new_vector(32, 112)
- --enable the use of the mouse
- poke(0x5f2d, 1)
+ --controls:
+ hand_speed = _new_vector(0,0)
+ hand_position = _new_vector(64,64)
+ --sets de delta time:
  last_time = time()
 end
-
                                                                                                                    
 --                                                  dddddddd                                                             
 --                                                  d::::::d                           tttt                              
@@ -222,22 +227,19 @@ function _update()
  _transform_blocks(delta_time)
  --update the mouse position
  if selected_tool != 0 then 
-  mouse_target = _snap_to_grid(stat(32), stat(33) + shift_target_y)
- else --free mouse when no tool selected:
-  mouse_target.x = stat(32)
-  mouse_target.y = stat(33)
+  mouse_target = _snap_to_grid(hand_position.x, hand_position.y + shift_target_y)
  end
  
- --right click to unselect a tool
- if stat(34) == 2 then
+ --button 2 to unselect a tool
+ if btn(5) == true then
   if not pressed then
    selected_tool = 0
   end
- --if we left click, we use the selected tool at the mouse position
- elseif stat(34) == 1 then
+ --button 1 to use the selected tool at the mouse position
+ elseif btn(4) == true then
   pressed = true
   --cannot build a block below the ui line (todo: refactor that)
-  if stat(33) < ui_line then
+  if hand_position.y < ui_line then
    if selected_tool == 1 then --build a block
     built_blocks = _add_sort_block(mouse_target.x, mouse_target.y, selected_palette, built_blocks)
    else --destroy a block
@@ -247,6 +249,43 @@ function _update()
  else
   pressed = false
  end
+
+ local horizontal_move = false
+ local vertical_move = false
+ if btn(0) then --left
+  hand_speed.x = max(hand_speed.x - hand_acceleration * delta_time, -max_hand_speed)
+  horizontal_move = true
+ end
+ if btn(1) then --right
+  hand_speed.x = min(hand_speed.x + hand_acceleration * delta_time, max_hand_speed)
+  if horizontal_move == true then
+   horizontal_move = false
+  else 
+   horizontal_move = true
+  end
+ end
+ if btn(2) then --up
+  hand_speed.y = max(hand_speed.y - hand_acceleration * delta_time, -max_hand_speed)
+  vertical_move = true
+ end
+ if btn(3) then --down
+  hand_speed.y = min(hand_speed.y + hand_acceleration * delta_time, max_hand_speed)
+  if vertical_move == true then
+   vertical_move = false
+  else 
+   vertical_move = true
+  end
+ end
+ if horizontal_move == false then --horizontal deceleraion:
+  hand_speed.x = 0.0
+ end
+ if vertical_move == false then -- vertical deceleraion:
+  hand_speed.y = 0.0 
+ end
+
+ hand_position.x += hand_speed.x * delta_time
+ hand_position.y += hand_speed.y * delta_time
+
  --ui buttons
  _tool_button(delete_button, 2)
  _palette_button(_new_vector(grass_button.x, grass_button.y + 3), 1)
@@ -255,6 +294,7 @@ function _update()
  --wild
  foreach(rules_list, _apply_wild_rule)
  last_time = time()
+ console[1] = pressed
 end
 
 --            dddddddd                                                                               
@@ -296,15 +336,15 @@ function _draw()
  --draws a black rect as a background
  rectfill(0,0,127,128,7)
  --draws all the built blocks
- for i = 1, #drawn_grid, 1 do
-  spr(blocks_atlas[drawn_grid[i].id], drawn_grid[i].x, drawn_grid[i].y, 2, 2)
+ for drawn_block in all(drawn_grid), 1 do
+  spr(blocks_atlas[drawn_block.id], drawn_block.x, drawn_block.y, 2, 2)
   --draws the wild
-  if drawn_grid[i].current_rule != 0 then
+  if drawn_block.current_rule != 0 then
    tested_rule = 1
    rule_found = false
    while rule_found == false do --we test all the rules to find the proper asset
-    if drawn_grid[i].current_rule == rules_list[tested_rule].rule_id then
-     spr(rules_list[tested_rule].atlas, drawn_grid[i].x, drawn_grid[i].y, 2, 1)
+    if drawn_block.current_rule == rules_list[tested_rule].rule_id then
+     spr(rules_list[tested_rule].atlas, drawn_block.x, drawn_block.y, 2, 1)
      rule_found = true
     end
     tested_rule += 1
@@ -321,11 +361,12 @@ function _draw()
   spr(tools_atlas[selected_tool], mouse_target.x, mouse_target.y, 2, 1)
  end
  --draws the mouse hand differently depending on if pressed
- if pressed then
-  spr(mouse_atlas[2], stat(32), stat(33), 2, 1)
- else
-  spr(mouse_atlas[1], stat(32), stat(33), 2, 1)
- end
+ -- if pressed then
+ --  spr(mouse_atlas[2], stat(32), stat(33), 2, 1)
+ -- else
+ --  spr(mouse_atlas[1], stat(32), stat(33), 2, 1)
+ -- end
+  spr(mouse_atlas[1], hand_position.x, hand_position.y, 2, 1)
  --debug console
  if debug then
   for i = 1, #console do
@@ -334,7 +375,6 @@ function _draw()
   end
  end
 end
-
 
 --uuuuuuuu     uuuuuuuuiiiiiiiiii
 --u::::::u     u::::::ui::::::::i
@@ -387,9 +427,9 @@ end
 -------------------------------------------------------------------------------
 --handle over and click on a tool button
 function _tool_button(button_position, tool_id)
- if _is_colliding(stat(32)+mouse_pointer.x, stat(33)+mouse_pointer.y, button_position, _new_vector(16,16)) then
+ if _is_colliding(hand_position.x+mouse_pointer.x, hand_position.y+mouse_pointer.y, button_position, _new_vector(16,16)) then
   overed_tool = tool_id
-  if stat(34) == 1 then
+  if pressed then
    selected_tool = tool_id
   end
  elseif overed_tool == tool_id then
@@ -399,9 +439,9 @@ end
 -------------------------------------------------------------------------------
 --handle over and click on a palette button
 function _palette_button(button_position, palette_id)
- if _is_colliding(stat(32)+mouse_pointer.x, stat(33)+mouse_pointer.y, button_position, _new_vector(8,16)) then
+ if _is_colliding(hand_position.x+mouse_pointer.x, hand_position.y+mouse_pointer.y, button_position, _new_vector(8,16)) then
   overed_palette = palette_id
-  if stat(34) == 1 then
+  if pressed then
    selected_palette = palette_id
    selected_tool = 1
   end
@@ -418,7 +458,6 @@ function _blinker(period)
   return false
  end
 end
-
 
 --                                                            dddddddd
 --                                          iiii              d::::::d
@@ -665,34 +704,34 @@ __gfx__
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000ffff0000000000000000000000000000cccc0000000000000000000000000000cccc0000000000000000000000000000cccc00000000000000
+000000000000ffffffff000000000000000000000000cccccccc000000000000000000000000cccccccc000000000000000000000000cccccccc000000000000
+0000000000ffffffffffff00000000000000000000cccccccccccc00000000000000000000cccccccccccc00000000000000000000ccc7cccccccc0000000000
+00000000ffffffffffffffff0000000000000000cccccc7ccccccccc0000000000000000cccccccccccccccc0000000000000000cccccccccccccccc00000000
+000000ffffffffffffffffffff000000000000cccccccccccccccccccc000000000000ccccccccccc7cccccccc000000000000cccccccccccccccccccc000000
+0000ffffffffffffffffffffffff00000000cccccccccccccccccccccccc00000000cccccccccccccccccccccccc00000000cccccccccccccccccccccccc0000
+00ffffffffffffffffffffffffffff0000cccccccccccccccccc7ccccccccc0000cccccccccccccccccccccccccccc0000cccccccccccccccccc7ccccccccc00
+0ffffffffffffffffffffffffffffff00cccccccccccccccccccccccccccccc00cccc7ccccccccccccccccccccccccc00cccc7ccccccccccccccccccccccccc0
+05ffffffffffffffffffffffffffff5001cccccccccccccccccccccccccccc1001ccccccccccccccccccccc7cccccc1001cccccccccccccccccccccccccccc10
+0555ffffffffffffffffffffffff55500111ccccccc7cccccccccccccccc11100111cccccccccccccccccccccccc11100111cccccccccccccccccccccccc1110
+055555ffffffffffffffffffff555550011111cccccccccccccccccccc111110011111cccccccccccccccccccc111110011111cccccccccccccccccccc111110
+05555555ffffffffffffffff5555555001111111cccccccccccccccc1111111001111111cccccc7ccccccccc1111111001111111ccccccccc7cccccc11111110
+0555555555ffffffffffff55555555500111111111ccccccc7cccc11111111100111111111cccccccccccc11111111100111111111cccccccccccc1111111110
+055555555555ffffffff555555555550011111111111cccccccc111111111110011111111111cccccccc111111111110011111111111cccccccc111111111110
+05555555555555ffff5555555555555001111111111111cccc1111111111111001111111111111cccc1111111111111001111111111111cccc11111111111110
+05555555555555555555555555555550011111111111111111111111111111100111111111111111111111111111111001111111111111111111111111111110
+05555555555555555555555555555550011111111111111111111111111111100111111111111111111111111111111001111111111111111111111111111110
+05555555555555555555555555555550011111111111111111111111111111100111111111111111111111111111111001111111111111111111111111111110
+05555555555555555555555555555550011111111111111111111111111111100111111111111111111111111111111001111111111111111111111111111110
+05555555555555555555555555555550011111111111111111111111111111100111111111111111111111111111111001111111111111111111111111111110
+05555555555555555555555555555550011111111111111111111111111111100111111111111111111111111111111001111111111111111111111111111110
+00555555555555555555555555555500001111111111111111111111111111000011111111111111111111111111110000111111111111111111111111111100
+00005555555555555555555555550000000011111111111111111111111100000000111111111111111111111111000000001111111111111111111111110000
+00000055555555555555555555000000000000111111111111111111110000000000001111111111111111111100000000000011111111111111111111000000
+00000000555555555555555500000000000000001111111111111111000000000000000011111111111111110000000000000000111111111111111100000000
+00000000005555555555550000000000000000000011111111111100000000000000000000111111111111000000000000000000001111111111110000000000
+00000000000055555555000000000000000000000000111111110000000000000000000000001111111100000000000000000000000011111111000000000000
+00000000000000555500000000000000000000000000001111000000000000000000000000000011110000000000000000000000000000111100000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
